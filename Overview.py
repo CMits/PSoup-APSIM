@@ -26,3 +26,6 @@ if img:
     st.image(str(img), caption="APSIM ↔ PSoup conceptual diagram", use_container_width=True)
 else:
     st.warning("Overview image not found. Put it at `assets/overview.png` or update app.py.")
+
+
+

@@ -527,3 +527,5 @@ if df is not None and not df.empty:
 
 else:
     st.info("Upload a file or select the bundled example to run batch calculations.")
+
+
