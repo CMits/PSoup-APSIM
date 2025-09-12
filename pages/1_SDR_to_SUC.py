@@ -135,155 +135,195 @@ st.markdown(
     """
 )
 
-# ------------- EXCEL BATCH (Linear + Tanh, GLOBAL median center) -------------
-st.markdown("---")
-st.markdown("## Excel batch: SDR → SUC (Linear & Tanh, WT anchored at **global** median SDR)")
+# -------------------- BATCH (EXCEL) --------------------
+import altair as alt
+from pathlib import Path
 
-upl = st.file_uploader(
-    "Upload an .xlsx with columns: **SupplyDemandRatio** and **Date** and/or **Years**.",
-    type=["xlsx"]
+st.markdown("---")
+st.subheader("Batch (Excel): Map APSIM SDR → PSoup SUC")
+
+# ---- Data source: upload or bundled example ----
+st.markdown("### Data source")
+src_choice = st.radio(
+    "Provide data via:",
+    ["Upload Excel (.xlsx)", "Use bundled example file"],
+    index=0,
 )
 
-if upl is not None:
-    import altair as alt
-
-    try:
-        xl = pd.ExcelFile(upl)
-        sheet = st.selectbox("Sheet", xl.sheet_names, index=0)
-        df_raw = xl.parse(sheet_name=sheet).copy()
-
-        st.write("**Preview:**")
-        st.dataframe(df_raw.head(15), use_container_width=True)
-
-        # Prepare
-        df_raw["Year"] = _extract_year(df_raw)
-        df_raw["SupplyDemandRatio"] = pd.to_numeric(df_raw["SupplyDemandRatio"], errors="coerce")
-
-        # ---- GLOBAL center (WT anchor): median SDR across ALL rows ----
-        global_median_sdr = float(df_raw["SupplyDemandRatio"].median(skipna=True))
-        halfspan = (U - L) / 2.0 if U > L else 25.0  # range scale for tanh
-        # keep 'k' from the sidebar; if you want a fixed value for batch, set here.
-
-        # Compute BOTH mappings using current sidebar bounds and k
-        df_raw["SUC_linear"] = df_raw["SupplyDemandRatio"].apply(
-            lambda v: map_linear(v, L=L, U=U, out_min=out_min, out_max=out_max)
-        )
-        df_raw["SUC_tanh"] = df_raw["SupplyDemandRatio"].apply(
-            lambda v: map_tanh(v,
-                               center=global_median_sdr,
-                               halfspan=halfspan,
-                               k=k,
-                               out_min=out_min, out_max=out_max)
-        )
-
-        # ---- Calculations table (document what we used) ----
-        calc_tbl = pd.DataFrame({
-            "Parameter": [
-                "SDR lower bound (L)", "SDR upper bound (U)",
-                "SUC min", "SUC max",
-                "Global median SDR (WT center)",
-                "Halfspan used for tanh",
-                "Smoothness k (tanh)",
-                "Rows processed"
-            ],
-            "Value": [L, U, out_min, out_max, global_median_sdr, halfspan, k, len(df_raw)]
-        })
-        st.markdown("### Calculations used (batch)")
-        st.dataframe(calc_tbl, use_container_width=True)
-
-        # ---- Per-row results ----
-        st.markdown("### Per-row results")
-        view = st.radio("Select columns to display", ["Linear", "Smooth (tanh)", "Both"], horizontal=True)
-        cols = ["Year", "SupplyDemandRatio"]
-        if view == "Linear":
-            cols += ["SUC_linear"]
-        elif view == "Smooth (tanh)":
-            cols += ["SUC_tanh"]
-        else:
-            cols += ["SUC_linear", "SUC_tanh"]
-
-        st.dataframe(
-            df_raw[cols].sort_values(["Year", "SupplyDemandRatio"]),
-            use_container_width=True, height=320
-        )
-
-        # ---- Per-year summary ----
-        st.markdown("### Per-year summary")
-        per_year = (
-            df_raw.groupby("Year", dropna=False)
-                  .agg(Year_Median_SDR=("SupplyDemandRatio", "median"),
-                       Year_Mean_SUC_linear=("SUC_linear", "mean"),
-                       Year_Mean_SUC_tanh=("SUC_tanh", "mean"),
-                       N=("SupplyDemandRatio", "size"))
-                  .reset_index()
-                  .sort_values("Year", kind="stable")
-        )
-        st.dataframe(per_year, use_container_width=True)
-
-        # ---- Colored comparison charts (side-by-side) ----
-        plot_df = per_year.dropna(subset=["Year"]).copy()
-        if not plot_df.empty:
-            plot_df["Year"] = plot_df["Year"].astype(int).astype(str)
-
-            # Melt to long format for grouped bars
-            long_df = plot_df.melt(
-                id_vars=["Year"],
-                value_vars=["Year_Mean_SUC_linear", "Year_Mean_SUC_tanh"],
-                var_name="Mapping", value_name="Mean_SUC"
-            )
-            long_df["Mapping"] = long_df["Mapping"].map({
-                "Year_Mean_SUC_linear": "Linear",
-                "Year_Mean_SUC_tanh": "Tanh"
-            })
-
-            st.markdown("#### Mean SUC by Year (Linear vs Tanh)")
-            bar = (
-                alt.Chart(long_df)
-                   .mark_bar()
-                   .encode(
-                       x=alt.X("Year:N", axis=alt.Axis(labelAngle=0, title="Year")),
-                       y=alt.Y("Mean_SUC:Q", title="Mean SUC"),
-                       color=alt.Color("Mapping:N",
-                                       legend=alt.Legend(title="Mapping"),
-                                       scale=alt.Scale(domain=["Linear","Tanh"],
-                                                       range=["#1f77b4", "#ff7f0e"])),
-                       xOffset="Mapping:N"  # group bars side-by-side
-                   )
-                   .properties(height=300)
-            )
-            st.altair_chart(bar, use_container_width=True)
-        else:
-            st.info("No valid Year values to plot.")
-
-        # ---- Downloads ----
-        st.markdown("#### Download results")
-        cD1, cD2, cD3 = st.columns(3)
-        with cD1:
-            st.download_button(
-                "Download per-row CSV (both Linear & Tanh)",
-                data=df_raw.to_csv(index=False).encode("utf-8"),
-                file_name="rows_with_SUC_linear_tanh.csv",
-                mime="text/csv"
-            )
-        with cD2:
-            st.download_button(
-                "Download per-year CSV",
-                data=per_year.to_csv(index=False).encode("utf-8"),
-                file_name="per_year_summary.csv",
-                mime="text/csv"
-            )
-        with cD3:
-            st.download_button(
-                "Download batch parameters (CSV)",
-                data=calc_tbl.to_csv(index=False).encode("utf-8"),
-                file_name="batch_parameters.csv",
-                mime="text/csv"
-            )
-
-        st.caption(f"WT anchor (tanh center) = **global median SDR** = {global_median_sdr:.3f}")
-
-    except Exception as e:
-        st.error(f"Failed to read/process Excel: {e}")
+xl = None
+if src_choice == "Use bundled example file":
+    example_path = Path(__file__).resolve().parents[1] / "Examples" / "psoup_factorial_Multiyears.xlsx"
+    if not example_path.exists():
+        st.error(f"Example file not found at: {example_path}")
+    else:
+        xl = pd.ExcelFile(str(example_path))
+        st.success(f"Loaded example: {example_path.name}")
 else:
-    st.info("Upload an Excel file to convert SDR→SUC for each row using Linear and Tanh mappings. "
-            "The **tanh center** is set to the **global median SDR** across the uploaded data.")
+    upl = st.file_uploader("Upload an Excel file (.xlsx)", type=["xlsx"])
+    if upl is not None:
+        xl = pd.ExcelFile(upl)
+
+# ---- Read & normalize ----
+def extract_year_cols(df: pd.DataFrame) -> pd.Series:
+    date = pd.to_datetime(df.get("Date"), dayfirst=True, errors="coerce")
+    years = pd.to_datetime(df.get("Years"), errors="coerce")
+    y = date.dt.year
+    if "Years" in df.columns:
+        y = y.fillna(years.dt.year)
+    return y
+
+if xl is not None:
+    sheet_name = st.selectbox("Sheet", xl.sheet_names, index=0)
+    try:
+        df = xl.parse(sheet_name=sheet_name).copy()
+    except Exception as e:
+        st.error(f"Could not read the selected sheet: {e}")
+        df = None
+else:
+    df = None
+
+if df is not None and not df.empty:
+    # Drop duplicate-named cols to avoid pyarrow issues
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    # Find SDR column
+    sdr_col_candidates = [
+        "SupplyDemandRatio", "SupplyDemand", "S/D_APSIM", "SDR", "SD"
+    ]
+    sdr_col = next((c for c in sdr_col_candidates if c in df.columns), None)
+    if sdr_col is None:
+        st.error("No SDR column found. Expected one of: "
+                 "`SupplyDemandRatio`, `SupplyDemand`, `S/D_APSIM`, `SDR`, `SD`.")
+        st.stop()
+
+    # Parse
+    df["SDR"] = pd.to_numeric(df[sdr_col], errors="coerce")
+    df["Year"] = extract_year_cols(df)
+
+    # Compute global stats
+    global_median_sdr = float(np.nanmedian(df["SDR"]))
+    st.info(f"Global SDR median (used as tanh center in batch): **{global_median_sdr:.3f}**")
+
+    # Compute both mappings (uses your page's sidebar settings L, U, out_min, out_max, k)
+    def _safe_halfspan(L, U):
+        return (U - L) / 2.0 if (U is not None and U > L) else 25.0
+
+    # Linear SUC
+    df["SUC_linear"] = df["SDR"].apply(
+        lambda x: map_linear(x, L=L, U=U, out_min=out_min, out_max=out_max)
+    )
+
+    # Smooth (tanh) SUC, center = global median SDR
+    df["SUC_tanh"] = df["SDR"].apply(
+        lambda x: map_tanh(
+            x,
+            center=global_median_sdr,
+            halfspan=_safe_halfspan(L, U),
+            k=k if "k" in locals() else 1.0,
+            out_min=out_min,
+            out_max=out_max
+        )
+    )
+
+    # Which to display
+    st.markdown("### Which mapping to display")
+    show_mode = st.radio(
+        "Choose mapping view",
+        ["Linear only", "Smooth (tanh) only", "Both"],
+        index=2
+    )
+
+    # Preview table
+    st.markdown("**Preview of rows**")
+    cols = ["Year", "SDR", "SUC_linear", "SUC_tanh"]
+    keep = [c for c in cols if c in df.columns]
+    st.dataframe(df[keep], use_container_width=True, height=340)
+
+    # Per-year summary (mean)
+    per_year = (
+        df.groupby("Year", dropna=True)
+          .agg(SDR_mean=("SDR","mean"),
+               SUC_linear_mean=("SUC_linear","mean"),
+               SUC_tanh_mean=("SUC_tanh","mean"))
+          .reset_index()
+          .dropna(subset=["Year"])
+    )
+
+    # Charts
+    st.markdown("### Per-year SUC summary")
+    base = per_year.copy()
+    base["Year"] = base["Year"].astype("Int64").astype(str)
+
+    if show_mode == "Linear only":
+        chart = (
+            alt.Chart(base)
+            .mark_bar()
+            .encode(
+                x=alt.X("Year:N", axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("SUC_linear_mean:Q", title="Mean SUC (Linear)"),
+                color=alt.value("#1f77b4")
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+    elif show_mode == "Smooth (tanh) only":
+        chart = (
+            alt.Chart(base)
+            .mark_bar()
+            .encode(
+                x=alt.X("Year:N", axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("SUC_tanh_mean:Q", title="Mean SUC (tanh)"),
+                color=alt.value("#ff7f0e")
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+    else:
+        # Both → side-by-side bars per year
+        melt = base.melt(
+            id_vars=["Year"],
+            value_vars=["SUC_linear_mean","SUC_tanh_mean"],
+            var_name="Mapping",
+            value_name="SUC"
+        )
+        mapping_order = ["SUC_linear_mean","SUC_tanh_mean"]
+        mapping_labels = {"SUC_linear_mean":"Linear","SUC_tanh_mean":"Smooth (tanh)"}
+        melt["Mapping"] = melt["Mapping"].map(mapping_labels)
+
+        chart = (
+            alt.Chart(melt)
+            .mark_bar()
+            .encode(
+                x=alt.X("Year:N", axis=alt.Axis(labelAngle=0), title="Year"),
+                y=alt.Y("SUC:Q", title="Mean SUC"),
+                color=alt.Color("Mapping:N",
+                                scale=alt.Scale(domain=["Linear","Smooth (tanh)"],
+                                                range=["#1f77b4","#ff7f0e"]),
+                                legend=alt.Legend(title="Mapping")),
+                xOffset=alt.X("Mapping:N", sort=["Linear","Smooth (tanh)"])
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+    # Downloads
+    st.markdown("### Downloads")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button(
+            "Download rows with SUC (CSV)",
+            data=df[keep].to_csv(index=False).encode("utf-8"),
+            file_name="sdr_to_suc_rows.csv",
+            mime="text/csv"
+        )
+    with c2:
+        st.download_button(
+            "Download per-year summary (CSV)",
+            data=per_year.to_csv(index=False).encode("utf-8"),
+            file_name="sdr_to_suc_per_year.csv",
+            mime="text/csv"
+        )
+else:
+    st.info("Upload a file or select the bundled example to run batch mapping.")

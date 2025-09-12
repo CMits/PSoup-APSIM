@@ -294,15 +294,36 @@ else:
 st.divider()
 
 # -------------------- BATCH (EXCEL) --------------------
-st.subheader("Batch (Excel): PSoup direction → TTN (with Genotypes, Resource classes, Yield)")
+st.subheader("Batch (Excel): PSoup direction → TTN (Genotypes, Resource classes, Yield)")
 
-import altair as alt  # ensure available
+import altair as alt
+from pathlib import Path
 
-upl = st.file_uploader(
-    "Upload .xlsx with columns: Genotype (opt), S/D_APSIM (or SD/SDR), SG_mut, SG_mut_SUC, h (opt), l (opt), Yield (opt), Date/Years (opt).",
-    type=["xlsx"]
+# ---- Data source ----
+st.markdown("### Data source")
+source_choice = st.radio(
+    "Provide data via:",
+    ["Upload Excel (.xlsx)", "Use bundled example file"],
+    index=0
 )
 
+xl = None
+if source_choice == "Use bundled example file":
+    example_path = Path(__file__).resolve().parents[1] / "Examples" / "example_psoup_to_ttn_25yrs_5mutants_2001_2025.xlsx"
+    if not example_path.exists():
+        st.error(f"Example file not found at: {example_path}")
+    else:
+        xl = pd.ExcelFile(str(example_path))
+        st.success(f"Loaded example: {example_path.name}")
+else:
+    upl = st.file_uploader(
+        "Upload .xlsx with columns: Genotype (opt), S/D_APSIM (or SD/SDR), SG_mut, SG_mut_SUC, h (opt), l (opt), Yield (opt), Date/Years (opt).",
+        type=["xlsx"]
+    )
+    if upl is not None:
+        xl = pd.ExcelFile(upl)
+
+# ---- Helpers ----
 def extract_year(df: pd.DataFrame) -> pd.Series:
     date = pd.to_datetime(df.get("Date"), dayfirst=True, errors="coerce")
     years = pd.to_datetime(df.get("Years"), errors="coerce")
@@ -312,29 +333,29 @@ def extract_year(df: pd.DataFrame) -> pd.Series:
     return y
 
 def classify_resource(sdr: float, t1: float, t2: float) -> str:
-    if pd.isna(sdr):
-        return "Unknown"
-    if sdr < t1:
-        return "Low"
-    elif sdr < t2:
-        return "Medium"
-    else:
-        return "High"
+    if pd.isna(sdr): return "Unknown"
+    return "Low" if sdr < t1 else ("Medium" if sdr < t2 else "High")
 
 with st.expander("Resource class settings", expanded=True):
     st.caption("Label each Year by SDR into Low / Medium / High resource.")
     t1 = st.slider("Threshold 1 (Low < t1)", min_value=0.0, max_value=50.0, value=20.0, step=1.0)
     t2 = st.slider("Threshold 2 (t1 ≤ Medium < t2; High ≥ t2)", min_value=0.0, max_value=50.0, value=35.0, step=1.0)
 
-if upl is not None:
-    xl = pd.ExcelFile(upl)
+# ---- Parse workbook ----
+df = None
+if xl is not None:
     sheet = st.selectbox("Sheet", xl.sheet_names, index=0)
-    df = xl.parse(sheet_name=sheet).copy()
+    try:
+        df = xl.parse(sheet_name=sheet).copy()
+    except Exception as e:
+        st.error(f"Could not read the selected sheet: {e}")
+        df = None
 
-    # Safety: drop dup columns
+if df is not None and not df.empty:
+    # Safety
     df = df.loc[:, ~df.columns.duplicated()].copy()
 
-    # Normalize columns
+    # Normalize
     df["Genotype"] = df.get("Genotype").astype("string")
     if "S/D_APSIM" in df.columns:
         df["SDR"] = pd.to_numeric(df["S/D_APSIM"], errors="coerce")
@@ -348,19 +369,19 @@ if upl is not None:
     df["Yield"] = pd.to_numeric(df.get("Yield"), errors="coerce")
     df["Year"] = extract_year(df)
 
-    # Optional replicates
+    # Replicates (optional)
     has_hl = ("h" in df.columns) and ("l" in df.columns)
     if has_hl:
         df["h"] = pd.to_numeric(df["h"], errors="coerce").fillna(0).astype(int)
         df["l"] = pd.to_numeric(df["l"], errors="coerce").fillna(0).astype(int)
         df["p"] = (df["h"] + 0.5) / (df["h"] + df["l"] + 1)
 
-    # Direction label
+    # Direction label (tau defined earlier in the page)
     df["Delta"] = df["SG_mut_SUC"] - df["SG_mut"]
     df["Label"] = np.where(df["Delta"] >  tau, "Higher",
                     np.where(df["Delta"] < -tau, "Lower", "Same"))
 
-    # Bounds: envelope or global
+    # Bounds: envelope or global (vars defined in sidebar earlier)
     if use_env_envelope:
         df["TTN_Low"]  = a0 + a1 * df["SDR"]
         df["TTN_High"] = b0 + b1 * df["SDR"]
@@ -371,7 +392,7 @@ if upl is not None:
     else:
         df["TTN_Low"], df["TTN_High"] = Tmin, Tmax
 
-    # Scheme A vs B
+    # Predicted TTN (Scheme A / B)
     try:
         replicate_mode = scheme.startswith("A") and z_preset.startswith("Replicate")
     except NameError:
@@ -408,30 +429,30 @@ if upl is not None:
         df["TTN_pred"] = [line_at(lbl, sdr) for lbl, sdr in zip(df["Label"], df["SDR"])]
         df["z"] = np.nan
 
-    # Resource class by thresholds
+    # Resource class and Year string
     df["ResourceClass"] = [classify_resource(v, t1, t2) for v in df["SDR"]]
     df["YearStr"] = df["Year"].astype("Int64").astype(str)
 
-    # -------- Preview table --------
+    # Preview
     st.markdown("**Preview of calculations**")
     cols = ["Year","YearStr","ResourceClass","Genotype","SDR"]
-    if has_hl:
-        cols += ["h","l","p"]
+    if has_hl: cols += ["h","l","p"]
     cols += ["SG_mut","SG_mut_SUC","Delta","Label","TTN_Low","TTN_High","z","TTN_pred","Yield"]
-    seen, cols_unique = set(), []
+    cols_unique = []
+    seen = set()
     for c in cols:
         if c in df.columns and c not in seen:
             cols_unique.append(c); seen.add(c)
     df_preview = df.loc[:, ~df.columns.duplicated()].copy()
     st.dataframe(df_preview[cols_unique], use_container_width=True, height=360)
 
-    # -------- Filters --------
+    # Filters
     st.markdown("### Filters")
-    genos = sorted([g for g in df["Genotype"].dropna().unique() if g != "nan"])
-    selected_genos = st.multiselect("Select Genotypes", genos, default=genos[:min(4, len(genos))])
+    geno_all = sorted([g for g in df["Genotype"].dropna().unique() if g != "nan"])
+    selected_genos = st.multiselect("Select Genotypes", geno_all, default=geno_all)
     df_plot = df[df["Genotype"].isin(selected_genos)] if selected_genos else df.copy()
 
-    # -------- Chart A: TTN bars grouped by Year and Genotype, faceted by Resource class --------
+    # Chart A: TTN bars grouped by Year and Genotype (side-by-side), faceted by Resource class
     st.markdown("### TTN by Year and Genotype (grouped bars), faceted by Resource class")
     if not df_plot.empty:
         chartA = (
@@ -452,7 +473,7 @@ if upl is not None:
     else:
         st.info("No rows after filter.")
 
-    # -------- Chart B: Yield by Year per Genotype (lines), faceted by Resource class --------
+    # Chart B: Yield by Year per Genotype (lines), faceted by Resource class
     st.markdown("### Yield by Year per Genotype (lines), faceted by Resource class")
     df_y = df_plot.dropna(subset=["Yield"]).copy()
     if not df_y.empty:
@@ -473,7 +494,7 @@ if upl is not None:
     else:
         st.info("Yield column missing or all NaN in filtered set.")
 
-    # -------- Downloads --------
+    # Downloads
     st.markdown("### Downloads")
     cdl1, cdl2 = st.columns(2)
     with cdl1:
@@ -483,7 +504,6 @@ if upl is not None:
             file_name="psoup_to_ttn_rows.csv",
             mime="text/csv"
         )
-
     with cdl2:
         params = {
             "scheme": scheme,
@@ -506,4 +526,4 @@ if upl is not None:
         )
 
 else:
-    st.info("Upload the example 50-year file above (or your own) to explore mutants across resource environments.")
+    st.info("Upload a file or select the bundled example to run batch calculations.")
