@@ -32,7 +32,7 @@ GENERAL_FEEDBACK_FILE = DATA_DIR / "general_feedback.csv"
 # --------------------------
 # 0) PAGE TITLE
 # --------------------------
-st.title("Why Integrating PSoup with APSIM Matters (Thesis-Style)")
+st.title("Why Integrating PSoup with APSIM Matters)  Work on progress. No need to read it")
 
 
 # --------------------------
@@ -59,7 +59,7 @@ The Crop Growth Model × Whole Genome Prediction literature, for example Messina
 ## 3. Why Integration is Important
 
 ### 3.1 From descriptive to causal prediction
-Without mechanistic links, predictions of branching plasticity remain empirical fits vulnerable to environmental shifts. Embedding PSoup in APSIM gives tiller number and survival a causal basis grounded in molecular regulation, transforming black-box parameters into transparent biological levers.
+Without mechanistic links, predictions of branching remain empirical fits vulnerable to environmental shifts. Embedding PSoup in APSIM gives tiller number and survival a causal basis grounded in molecular regulation, transforming black-box parameters into transparent biological levers.
 
 ### 3.2 Explaining G×E×M interactions
 Branching is highly environment-sensitive, including light, nutrients, and water. Integration allows APSIM to reflect how environmental signals modulate hormonal pathways, for example phosphate limitation and strigolactone synthesis, explaining cross-overs among genotypes across seasons and locations (Wang et al., 2019).

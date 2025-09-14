@@ -98,6 +98,31 @@ with rescol2:
 # ------------- MATH DISPLAY -------------
 st.markdown("### Mapping formulas")
 
+st.markdown(r"""
+**General linear rescale (before clipping):**
+
+$$
+s(x) \;=\; \frac{x - L}{U - L}\,(S_{\max}-S_{\min}) + S_{\min}
+$$
+
+Sometimes this value can fall outside the intended SUC range ($[S_{\min}, S_{\max}]$).  
+To fix that, we apply a *clipping* function:
+
+$$
+\text{clip}(y, a, b) \;=\; \min\!\big(b, \max(a, y)\big)
+$$
+
+so the final mapped value always stays within ($[a,b]$).
+
+**Symbols:**
+- \($L$) = SDR lower bound  
+- \($U$) = SDR upper bound  
+- \($S_{\min}$) = SUC minimum  
+- \($S_{\max}$) = SUC maximum  
+- \($x$) = input SDR  
+- \($s(x)$) = mapped SUC
+""")
+
 if mode.startswith("Linear"):
     st.latex(r"""
     \textbf{Linear:}\quad s(x)=
@@ -110,11 +135,12 @@ else:
     halfspan = (U - L) / 2.0 if U > L else 25.0
     st.latex(r"""
     \textbf{Smooth (tanh):}\quad
-    s(x)=\operatorname{clip}\!\Bigl(1+\tanh\!\bigl(\tfrac{x-%0.3f}{%0.3f\cdot %0.3f}\bigr),\ %0.3f,\ %0.3f\Bigr)
+    s(x)=\text{clip}\!\Bigl(1+\tanh\!\bigl(\tfrac{x-%0.3f}{%0.3f\cdot %0.3f}\bigr),\ %0.3f,\ %0.3f\Bigr)
     """ % (center, halfspan, k, out_min, out_max))
     st.latex(r"""
     \text{With } \text{center}=%0.3f,\ \text{halfspan}=%0.3f,\ k=%0.3f,\; s(%0.3f)=%0.3f
     """ % (center, halfspan, k, x, suc))
+
 
 # ------------- PLOT -------------
 st.markdown("### Visual mapping")
