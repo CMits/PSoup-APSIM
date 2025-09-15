@@ -1,31 +1,23 @@
 # app.py  — Overview (landing page)
+
+import streamlit as st
+from utils.analytics import inject_gtm, virtual_pageview, gtm_event
+
+# Option 1: hardcode
+GTM_ID = "GTM-MMPTCHWX"
+
+# Option 2 (cleaner): store in .streamlit/secrets.toml:
+# [analytics]
+# gtm = "GTM-XXXXXXX"
+# Then:
+# GTM_ID = st.secrets["analytics"]["gtm"]
+
+inject_gtm(GTM_ID)                 # inject once per session
+virtual_pageview("Home")  
+
 import streamlit as st
 
-GA_MEASUREMENT_ID = "G-0T2X9HX1T8"
 
-# Inject GA only once per user session
-if "ga_injected" not in st.session_state:
-    st.session_state["ga_injected"] = True
-    st.markdown(
-        f"""
-        <!-- Google tag (gtag.js) -->
-        <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
-        <script>
-          window.dataLayer = window.dataLayer || [];
-          function gtag(){{dataLayer.push(arguments);}}
-          gtag('js', new Date());
-          // Avoid duplicate auto page_view on Streamlit reruns
-          gtag('config', '{GA_MEASUREMENT_ID}', {{ 'send_page_view': false }});
-          // Send one explicit page_view for this Streamlit page
-          gtag('event', 'page_view', {{
-            page_title: 'Overview',
-            page_location: window.location.href,
-            page_path: window.location.pathname + window.location.search
-          }});
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 
